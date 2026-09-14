@@ -1,0 +1,10 @@
+FROM postgres:16
+
+# Install PostGIS and pgvector
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    postgresql-16-postgis-3 \
+    postgresql-16-pgvector \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy initialization script
+COPY init-extensions.sql /docker-entrypoint-initdb.d/

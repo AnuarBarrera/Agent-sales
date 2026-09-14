@@ -1,0 +1,17 @@
+import { useEffect, useMemo, useState } from "react";
+import { assignLeads, getLeads, getSummary, LeadItem, Summary } from "./adminApi";
+
+export function AssignmentsPage() {
+  const [leads, setLeads] = useState<LeadItem[]>([]);
+  const [summary, setSummary] = useState<Summary | null>(null);
+  const [selected, setSelected] = useState<string[]>([]);
+  const [assignee, setAssignee] = useState("");
+  const [role, setRole] = useState<"setter" | "closer">("setter");
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => { Promise.all([getLeads(), getSummary()]).then(([leadResponse, summaryResponse]) => { setLeads(leadResponse.items); setSummary(summaryResponse); }).catch((reason: Error) => setError(reason.message)); }, []);
+  const unassigned = useMemo(() => leads.filter(lead => !lead.setter_name && !lead.closer_name), [leads]);
+  function toggle(id: string) { setSelected(current => current.includes(id) ? current.filter(item => item !== id) : [...current, id]); }
+  async function assign() { if (!assignee || selected.length === 0) return; try { await assignLeads(selected, assignee, role); setLeads(current => current.filter(lead => !selected.includes(lead.id))); setSelected([]); } catch (reason) { setError((reason as Error).message); } }
+  const members = summary?.member_workload?.filter(member => member.role === role) || [];
+  return <div className="space-y-8"><div><p className="eyebrow">Distribución</p><h1 className="page-title">Asignaciones</h1><p className="page-subtitle">Reparte leads sin responsable y deja el historial de cada cambio.</p></div>{error && <div role="alert" className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}<section className="card"><div className="flex flex-wrap items-center justify-between gap-4"><div><h2 className="section-title">Sin responsable</h2><p className="mt-1 text-sm text-slate-500">Selecciona uno o varios leads para asignarlos en lote.</p></div><span className="badge">{unassigned.length} disponibles</span></div><div className="mt-5 space-y-2">{unassigned.map(lead => <label className="flex items-center gap-3 rounded-xl border border-slate-200 px-4 py-3 hover:border-teal-300" key={lead.id}><input type="checkbox" aria-label={`Seleccionar ${lead.name}`} checked={selected.includes(lead.id)} onChange={() => toggle(lead.id)} /><span className="font-semibold">{lead.name}</span></label>)}{unassigned.length === 0 && <p className="rounded-xl bg-slate-50 px-4 py-5 text-sm text-slate-500">No hay leads pendientes de asignar.</p>}</div></section><section className="card"><div className="flex flex-wrap items-center gap-3"><select aria-label="Tipo de responsable" className="input" value={role} onChange={event => { setRole(event.target.value as "setter" | "closer"); setAssignee(""); }}><option value="setter">Setter</option><option value="closer">Closer</option></select><select aria-label="Responsable" className="input min-w-48" value={assignee} onChange={event => setAssignee(event.target.value)}><option value="">Selecciona responsable</option>{members.map(member => <option key={member.id} value={member.id}>{member.full_name}</option>)}</select><button className="btn-primary" disabled={selected.length === 0 || !assignee} onClick={assign}>Asignar seleccionados</button></div>{selected.length > 0 && <p className="mt-4 text-sm font-semibold text-teal-700">{selected.length} lead seleccionado{selected.length === 1 ? "" : "s"}</p>}</section></div>;
+}
