@@ -4,7 +4,7 @@
 
 **De una búsqueda de negocios a una conversación informada, con seguimiento por lead.**
 
-Agent Sales conecta descubrimiento en Google Maps, evaluación explicable de condiciones comerciales y preparación de primeros contactos en un CRM. La demo del hackatón utiliza **Tu Web MX** como negocio de ejemplo: cada participante revisa su contexto, aprueba las condiciones y decide cómo continuar con cada prospecto.
+Agent Sales conecta descubrimiento en Google Maps, investigación con Tavily, evaluación explicable con Jev y preparación de contactos con NVIDIA Nemotron servido por Nebius Token Factory, dentro de un CRM con revisión humana. La demo del hackatón utiliza **Tu Web MX** como negocio de ejemplo: cada participante revisa su contexto, aprueba las condiciones y decide cómo continuar con cada prospecto.
 
 [Abrir demo](https://tuwebmx.anuarbarrera.dev) · [Recorrido](#recorrido-de-la-demo) · [Arquitectura](#arquitectura) · [Despliegue](#despliegue-con-docker-compose)
 
@@ -18,7 +18,7 @@ Agent Sales conecta las decisiones con la evidencia disponible y mantiene a la p
 
 1. **Acceder con correo y código OTP.** Cada participante obtiene un espacio de trabajo propio.
 2. **Revisar el negocio y su contexto comercial.** Aprobar oferta, perfil objetivo, señales, exclusiones y canales permitidos.
-3. **Buscar negocios en Maps.** Seleccionar giro y zona en un mapa; la búsqueda se procesa en segundo plano.
+3. **Descubrir y enriquecer negocios.** Seleccionar giro y zona en Maps; el worker incorpora evidencia web mediante Tavily antes de evaluar las condiciones con Jev.
 4. **Revisar resultados y fuentes.** Consultar identidad, contacto, condiciones evaluadas, evidencia y preguntas pendientes.
 5. **Preparar y aprobar un borrador.** Elegir correo o pitch de llamada según los canales disponibles. El texto requiere revisión humana antes de quedar listo para uso manual.
 6. **Dar seguimiento.** Registrar el contacto realizado y su resultado, guardar notas, programar tareas, completarlas y consultar el historial del lead.
@@ -41,7 +41,11 @@ flowchart LR
     Worker --> Garage
     API --> Mailgun[Mailgun / OTP]
     Worker --> Maps[Google Maps Platform]
+    Worker --> Tavily[Tavily / Search + Extract]
     Worker --> Jev[Jev vía OpenRouter]
+    API --> Nebius[Nebius Token Factory]
+    Worker --> Nebius
+    Nebius --> Nemotron[NVIDIA Nemotron]
 ```
 
 | Capa | Tecnología | Responsabilidad |
@@ -52,9 +56,27 @@ flowchart LR
 | Procesamiento | RQ, Redis | Ejecución de búsquedas y evaluaciones en segundo plano |
 | Persistencia | PostgreSQL, PostGIS, pgvector, Alembic | Leads, evidencia, cuotas, aprobaciones, tareas y migraciones |
 | Archivos | Garage, API compatible con S3 | Documentos y archivos del CRM |
-| Integraciones | Maps, Mailgun, Jev/OpenRouter | Descubrimiento, acceso por correo y evaluación de evidencia |
+| Descubrimiento y fuentes | Google Maps, Tavily Search + Extract | Negocios candidatos y evidencia web trazable |
+| Evaluación | Jev vía OpenRouter | Juicios estructurados sobre las condiciones comerciales |
+| Inferencia y generación | Nebius Token Factory, NVIDIA Nemotron | Interpretación y borradores sujetos a contratos y revisión humana |
+| Correo de acceso | Mailgun | Entrega de códigos OTP |
 
-Identidad, prospección, contexto comercial, evaluación, borradores y actividades tienen responsabilidades y contratos explícitos. Las integraciones adicionales del CRM, como Tavily y los proveedores de generación, se habilitan por configuración; la superficie pública ofrece un conjunto acotado de capacidades.
+Identidad, prospección, contexto comercial, evaluación, borradores y actividades tienen responsabilidades y contratos explícitos. Los proveedores se configuran en el servidor; cada operación conserva los controles de acceso, presupuesto y evidencia de su módulo.
+
+## IA y fuentes: el papel de cada tecnología
+
+| Tecnología | Papel en el proyecto | Resultado que aporta |
+| --- | --- | --- |
+| **Tavily** | Buscar información pública y extraer contenido de una URL seleccionada | Fuentes con URL, fragmentos y metadatos que pueden revisarse y vincularse al negocio |
+| **Jev** | Evaluar condiciones comerciales sobre la evidencia disponible | Juicios estructurados, razones y condiciones que siguen sin establecerse |
+| **Nebius Token Factory** | Servir inferencia mediante una API compatible con OpenAI | Acceso al modelo configurado, con límites de tiempo y registro de proveedor, modelo, consumo y latencia |
+| **NVIDIA Nemotron** | Interpretar evidencia y generar respuestas estructuradas en los flujos de análisis y Setter que usan el modelo configurado en Nebius | Interpretación comercial y borradores de primer contacto vinculados al contexto aprobado |
+
+**Del descubrimiento a la evidencia.** Maps aporta los candidatos y sus datos iniciales. La búsqueda de la demo solicita un enriquecimiento acotado con Tavily antes de Jev: hasta una búsqueda, una extracción cuando hay una URL elegible y un máximo de tres fuentes seleccionadas por candidato. Se conserva la procedencia; encontrar una página no prueba por sí solo que pertenezca al negocio. La investigación manual adicional permanece fuera de la superficie pública.
+
+**De la evidencia al borrador.** Nebius es la plataforma de inferencia y Nemotron es el modelo configurado para las rutas que utilizan `NEBIUS_MODEL`; el valor predeterminado del repositorio es `nvidia/nemotron-3-super-120b-a12b`. El CRM integra este proveedor para análisis de prospectos, sugerencias de contexto comercial y generación de Setter. Los contratos validan la estructura de la respuesta y las referencias a evidencia autorizadas.
+
+**Disponibilidad en la demo.** La evaluación Jev y la revisión humana mantienen responsabilidades independientes de la generación. Cuando sólo puede prepararse una pregunta de discovery, Setter utiliza una plantilla determinista que reconoce la oportunidad no confirmada. Los borradores apoyados en una oportunidad establecida utilizan el proveedor Nebius configurado. La aprobación del mensaje y el registro del contacto continúan siendo acciones explícitas de la persona usuaria.
 
 ## Decisiones de diseño
 
@@ -100,7 +122,7 @@ Compose inicia **PostgreSQL, Redis, Garage, API, worker y frontend**. La API apl
 
 ### Habilitar el recorrido público
 
-El acceso público está deshabilitado por defecto. Para activar OTP, Maps y evaluación, configura:
+El acceso público está deshabilitado por defecto. Para activar OTP, Maps, enriquecimiento y evaluación, y habilitar los flujos de generación con modelo, configura:
 
 | Grupo | Variables |
 | --- | --- |
@@ -109,7 +131,10 @@ El acceso público está deshabilitado por defecto. Para activar OTP, Maps y eva
 | OTP | `DEMO_OTP_HMAC_KEY` de al menos 32 bytes |
 | Entrega de correo | `MAILGUN_API_KEY`, `MAILGUN_DOMAIN`, `MAILGUN_SENDER_EMAIL`, `MAILGUN_REGION` |
 | Maps | `GOOGLE_PLACES_API_KEY`, `GOOGLE_GEOCODING_API_KEY` |
+| Investigación web | `TAVILY_ENABLED=true`, `TAVILY_API_KEY`, `TAVILY_TIMEOUT_SECONDS` |
 | Evaluación | `LEAD_FIT_ENABLED=true`, `JEV_ENABLED=true`, `OPENROUTER_API_KEY` |
+| Inferencia Nebius | `NEBIUS_ENABLED=true`, `NEBIUS_API_KEY`, `NEBIUS_BASE_URL=https://api.tokenfactory.nebius.com/v1` |
+| Modelo Nemotron | `NEBIUS_MODEL=nvidia/nemotron-3-super-120b-a12b`; `NEBIUS_TIMEOUT_SECONDS` y, si corresponde, `NEBIUS_AI_PROJECT_ID` |
 | Capacidad global | `DEMO_GLOBAL_SEARCH_LIMIT`, con valor inicial de `40` |
 
 Publica el frontend detrás de un proxy o túnel HTTPS. El origen de la demo y el de CORS deben coincidir con ese dominio. Las credenciales deben tener habilitados los servicios y remitentes correspondientes. Las claves de correo y OTP se entregan sólo a la API.
