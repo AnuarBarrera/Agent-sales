@@ -20,6 +20,7 @@
 **/.pytest_cache/
 **/.ruff_cache/
 **/.mypy_cache/
+**/.artifacts/
 **/.vite/
 
 # Local reports, fixtures and working copies
