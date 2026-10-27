@@ -1,0 +1,13 @@
+*
+!Dockerfile
+!Dockerfile.postgres
+!README.md
+!pyproject.toml
+!alembic.ini
+!init-extensions.sql
+!app/
+!app/**
+!migrations/
+!migrations/**
+**/__pycache__/
+**/*.py[cod]

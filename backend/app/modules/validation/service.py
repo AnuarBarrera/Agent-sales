@@ -219,11 +219,16 @@ class ValidationService:
 
     async def _check_google_presence(self, lead: Lead) -> tuple[ValidationResult, str | None, str | None]:
         """Check Google Places presence."""
-        if not lead.business or not lead.business.place_id:
-            return ValidationResult.NONE, "No Google Place ID", None
+        business = lead.business
+        if (
+            not business
+            or business.provider != "google_places"
+            or not business.source_key
+        ):
+            return ValidationResult.NONE, "No verified Google Places identity", None
 
         try:
-            place = await self.places_provider.details(lead.business.place_id)
+            place = await self.places_provider.details(business.source_key)
             if place and place.place_id:
                 return ValidationResult.ACTIVE, f"Google Places listing found: {place.name}", place.place_id
             return ValidationResult.NOT_FOUND, "Place not found in Google Places", None

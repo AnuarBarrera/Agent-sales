@@ -9,7 +9,14 @@ from app.modules.leads import models as leads_models  # noqa: F401
 from app.modules.notifications import models as notifications_models  # noqa: F401
 from app.modules.outreach import models as outreach_models  # noqa: F401
 from app.modules.pipeline import models as pipeline_models  # noqa: F401
+from app.modules.prospect_analysis import models as prospect_analysis_models  # noqa: F401
+from app.modules.prospect_research import models as prospect_research_models  # noqa: F401
 from app.modules.prospection import models as prospection_models  # noqa: F401
 from app.modules.rag import models as rag_models  # noqa: F401
+from app.modules.sales_playbook import (
+    generation_models as sales_playbook_generation_models,  # noqa: F401
+)
+from app.modules.sales_playbook import models as sales_playbook_models  # noqa: F401
 from app.modules.seller_profile import models as seller_profile_models  # noqa: F401
+from app.modules.setter import models as setter_models  # noqa: F401
 from app.modules.validation import models as validation_models  # noqa: F401

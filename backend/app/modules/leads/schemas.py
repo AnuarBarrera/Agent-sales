@@ -8,7 +8,9 @@ from pydantic import BaseModel, ConfigDict, Field
 
 # Business schemas
 class BusinessBase(BaseModel):
-    place_id: str = Field(..., max_length=255)
+    place_id: str | None = Field(None, max_length=255)
+    provider: str | None = Field(None, max_length=50)
+    source_key: str | None = Field(None, max_length=512)
     name: str = Field(..., min_length=1, max_length=255)
     address: str | None = Field(None, max_length=500)
     phone: str | None = Field(None, max_length=50)
@@ -127,6 +129,7 @@ class LeadListItem(BaseModel):
     priority: int
     next_follow_up_at: datetime | None
     last_activity_at: datetime | None
+    contacted: bool = False
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)

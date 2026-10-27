@@ -1,17 +1,24 @@
 import { Outlet, NavLink } from "react-router-dom";
 import { useAuth } from "../features/auth/useAuth";
+import { DemoQuota } from "../features/demo/DemoQuota";
 
 export function Layout() {
-  const { logout, user } = useAuth();
+  const { logout, user, demo } = useAuth();
 
-  const navItems = [
+  const internalNavItems = [
     { path: "/leads", label: "Inicio / Leads", end: true },
     { path: "/leads/import", label: "Importar leads" },
     { path: "/prospection/new", label: "Nueva Búsqueda" },
     { path: "/pipeline", label: "Pipeline" },
     { path: "/seller-profile", label: "Mi negocio" },
+    { path: "/sales-playbook", label: "Sales Playbook" },
   ];
-  const adminNavItems = user?.role === "admin" ? [
+  const navItems = demo?.enabled ? [
+    { path: "/demo", label: "Mi negocio", end: true },
+    { path: "/prospection/new", label: "Buscar prospectos" },
+    { path: "/leads", label: "Resultados" },
+  ] : internalNavItems;
+  const adminNavItems = !demo?.enabled && user?.role === "admin" ? [
     { path: "/admin", label: "Administración", end: true },
     { path: "/admin/team", label: "Equipo" },
     { path: "/admin/assignments", label: "Asignaciones" },
@@ -29,8 +36,9 @@ export function Layout() {
       <aside className="hidden w-64 shrink-0 flex-col bg-ink px-4 py-5 text-slate-200 md:flex">
         <div className="flex items-center gap-3 px-3">
           <span className="grid h-10 w-10 place-items-center rounded-xl bg-teal-500 font-black text-white">TW</span>
-          <div><p className="font-bold text-white">Tu Web MX</p><p className="text-xs text-slate-400">CRM comercial</p></div>
+          <div><p className="font-bold text-white">Tu Web MX</p><p className="text-xs text-slate-400">{demo?.enabled ? "Demo guiada" : "CRM comercial"}</p></div>
         </div>
+        {demo?.enabled && <div className="px-3 pt-6"><DemoQuota /></div>}
         <nav className="mt-10 space-y-2">
           {[...navItems, ...adminNavItems].map((item) => (
             <NavLink
@@ -54,11 +62,12 @@ export function Layout() {
       </aside>
 
       <div className="flex min-h-screen min-w-0 flex-1 flex-col">
-        <header className="sticky top-0 z-10 border-b border-slate-200/80 bg-canvas/95 px-4 py-4 backdrop-blur md:hidden">
+        <header className="demo-mobile-header sticky top-0 z-10 border-b border-slate-200/80 bg-canvas/95 px-4 py-4 backdrop-blur md:hidden">
           <div className="flex items-center justify-between gap-4">
             <div className="flex items-center gap-3"><span className="grid h-9 w-9 place-items-center rounded-xl bg-teal-600 text-xs font-black text-white">TW</span><span className="font-bold text-ink">Tu Web MX</span></div>
             <button onClick={logout} className="text-sm font-semibold text-slate-500">Salir</button>
           </div>
+          {demo?.enabled && <div className="mt-3"><DemoQuota /></div>}
           <nav className="mt-4 flex gap-2 overflow-x-auto pb-1">
             {[...navItems, ...adminNavItems].map((item) => <NavLink key={item.path} to={item.path} end={item.end} className={({ isActive }) => `whitespace-nowrap rounded-lg px-3 py-2 text-xs font-semibold ${isActive ? "bg-teal-100 text-teal-700" : "text-slate-500"}`}>{item.label}</NavLink>)}
           </nav>

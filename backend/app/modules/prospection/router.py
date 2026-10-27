@@ -1,6 +1,7 @@
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.permissions import can_view_run, require_role_dependency
@@ -10,6 +11,7 @@ from app.modules.identity.service import IdentityService
 from app.modules.prospection.schemas import (
     ProspectionRunCreate,
     ProspectionRunEventResponse,
+    ProspectionRunFitResults,
     ProspectionRunListItem,
     ProspectionRunRead,
     RunEventRead,
@@ -59,20 +61,152 @@ def create_prospection_run(
 ) -> ProspectionRunRead:
     """Create a new prospection run."""
     user_id, workspace_id, _ = current_user
-    run = service.create_run(user_id, workspace_id, run_data)
+    if run_data.discovery_strategy is not None:
+        from app.modules.lead_fit.router import require_lead_fit_enabled
+
+        try:
+            require_lead_fit_enabled()
+        except HTTPException:
+            raise
+    try:
+        run = service.create_run(user_id, workspace_id, run_data)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail="Approved policy changed; refresh the search plan") from exc
+    response_snapshot = serialize_run(run)
+    run_id_text = str(run.id)
     # Commit before enqueueing so a fast worker can see the run row.
     service.db.commit()
     try:
         from app.workers.queue import enqueue_prospection_run
 
-        enqueue_prospection_run(str(run.id))
+        enqueue_prospection_run(run_id_text)
     except Exception as exc:
         service.db.rollback()
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="No se pudo encolar la prospección; verifica Redis",
         ) from exc
-    return serialize_run(run)
+    return response_snapshot
+
+
+@router.get("/{run_id}/fit-results", response_model=ProspectionRunFitResults)
+def get_fit_results(
+    run_id: UUID,
+    classification: str | None = Query(None),
+    evaluation_status: str | None = Query(None),
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    service: ProspectionService = Depends(get_prospection_service),
+    current_user: tuple[UUID, UUID, UserRole] = Depends(require_prospection_view),
+) -> ProspectionRunFitResults:
+    """Return latest per-lead fit rows plus discovery and decision counts."""
+    from app.modules.lead_fit.models import LeadFitEvaluation, LeadFitEvaluationStatus
+    from app.modules.lead_fit.router import require_lead_fit_enabled
+    from app.modules.lead_fit.schemas import FitEvaluationRead
+    from app.modules.prospection.models import RunEvent, RunLead
+
+    require_lead_fit_enabled()
+    user_id, workspace_id, _ = current_user
+    run = service.get_run(run_id, workspace_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Prospection run not found")
+    member = IdentityService(service.db).get_active_membership(user_id, workspace_id)
+    if member is None or not can_view_run(member, run):
+        raise HTTPException(status_code=403, detail="Not authorized to view this run")
+    if run.fit_policy_id is None:
+        raise HTTPException(status_code=409, detail="Run has no Lead Fit policy snapshot")
+    if classification not in {None, "qualified", "needs_more_research", "not_qualified"}:
+        raise HTTPException(status_code=400, detail="Invalid classification filter")
+    if evaluation_status not in {None, *(item.value for item in LeadFitEvaluationStatus)}:
+        raise HTTPException(status_code=400, detail="Invalid evaluation status filter")
+
+    lead_ids = select(RunLead.lead_id).where(
+        RunLead.workspace_id == workspace_id,
+        RunLead.run_id == run_id,
+        RunLead.lead_id.is_not(None),
+    )
+    latest = select(
+        LeadFitEvaluation.id.label("evaluation_id"),
+        func.row_number().over(
+            partition_by=LeadFitEvaluation.lead_id,
+            order_by=LeadFitEvaluation.requested_at.desc(),
+        ).label("row_number"),
+    ).where(
+        LeadFitEvaluation.workspace_id == workspace_id,
+        LeadFitEvaluation.policy_id == run.fit_policy_id,
+        LeadFitEvaluation.lead_id.in_(lead_ids),
+    ).subquery()
+    base = select(LeadFitEvaluation).join(
+        latest, latest.c.evaluation_id == LeadFitEvaluation.id,
+    ).where(latest.c.row_number == 1)
+    filtered = base
+    if classification is not None:
+        filtered = filtered.where(LeadFitEvaluation.classification == classification)
+    if evaluation_status is not None:
+        filtered = filtered.where(LeadFitEvaluation.status == evaluation_status)
+    total = service.db.execute(select(func.count()).select_from(filtered.subquery())).scalar_one()
+    rows = service.db.execute(
+        filtered.order_by(LeadFitEvaluation.requested_at.desc()).limit(limit).offset(offset)
+    ).scalars().all()
+    counts_statement = (
+        select(LeadFitEvaluation.status, LeadFitEvaluation.classification, func.count())
+        .join(latest, latest.c.evaluation_id == LeadFitEvaluation.id)
+        .where(
+            latest.c.row_number == 1,
+            LeadFitEvaluation.workspace_id == workspace_id,
+        )
+    )
+    if classification is not None:
+        counts_statement = counts_statement.where(LeadFitEvaluation.classification == classification)
+    if evaluation_status is not None:
+        counts_statement = counts_statement.where(LeadFitEvaluation.status == evaluation_status)
+    counts_rows = service.db.execute(
+        counts_statement.group_by(LeadFitEvaluation.status, LeadFitEvaluation.classification)
+    ).all()
+    evaluation_lead_ids = select(LeadFitEvaluation.lead_id).where(
+        LeadFitEvaluation.workspace_id == workspace_id,
+        LeadFitEvaluation.policy_id == run.fit_policy_id,
+        LeadFitEvaluation.lead_id.in_(lead_ids),
+    )
+    missing_evaluation_leads = service.db.execute(select(RunLead.lead_id).where(
+        RunLead.workspace_id == workspace_id,
+        RunLead.run_id == run_id,
+        RunLead.lead_id.is_not(None),
+        RunLead.lead_id.not_in(evaluation_lead_ids),
+    ).distinct()).scalars().all()
+    unavailable_events = service.db.execute(
+        select(RunEvent).where(
+            RunEvent.run_id == run_id,
+            RunEvent.event_type == "prospection.fit_evaluation.unavailable",
+        )
+    ).scalars().all()
+    unavailable_lead_ids = {str(lead_id) for lead_id in missing_evaluation_leads}
+    unavailable_lead_ids.update(
+        event.payload["lead_id"]
+        for event in unavailable_events
+        if isinstance(event.payload, dict) and isinstance(event.payload.get("lead_id"), str)
+    )
+    counts = {"qualified": 0, "needs_more_research": 0, "not_qualified": 0,
+              "evaluation_failed": 0, "pending": 0}
+    for row in counts_rows:
+        row_status, row_classification, amount = row
+        if row_classification in counts:
+            counts[row_classification] += amount
+        if row_status == LeadFitEvaluationStatus.FAILED:
+            counts["evaluation_failed"] += amount
+        if row_status in {LeadFitEvaluationStatus.PENDING, LeadFitEvaluationStatus.RUNNING}:
+            counts["pending"] += amount
+    return ProspectionRunFitResults(
+        run_id=run.id,
+        found_count=run.found_count,
+        new_count=run.new_count,
+        duplicate_count=run.duplicate_count,
+        discovery_failed_count=run.error_count,
+        evaluation_unavailable_count=len(unavailable_lead_ids),
+        total=total,
+        **counts,
+        items=[FitEvaluationRead.model_validate(row).model_dump(mode="json") for row in rows],
+    )
 
 
 @router.get("", response_model=list[ProspectionRunListItem])

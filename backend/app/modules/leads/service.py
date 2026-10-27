@@ -123,6 +123,7 @@ class LeadService:
                 closer_name=lead.closer_name,
                 priority=lead.priority,
                 next_follow_up_at=lead.next_follow_up_at,
+                contacted=lead.contacted,
                 last_activity_at=lead.last_activity_at,
                 created_at=lead.created_at,
             )

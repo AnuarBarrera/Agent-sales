@@ -5,9 +5,11 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     DateTime,
     Enum,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     String,
     Text,
@@ -50,7 +52,9 @@ class Business(Base):
     workspace_id: Mapped[uuid.UUID] = mapped_column(
         PG_UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    place_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    place_id: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    provider: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    source_key: Mapped[str | None] = mapped_column(String(512), nullable=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     address: Mapped[str | None] = mapped_column(String(500), nullable=True)
     phone: Mapped[str | None] = mapped_column(String(50), nullable=True)
@@ -70,10 +74,31 @@ class Business(Base):
         nullable=False,
     )
 
-    leads: Mapped[list["Lead"]] = relationship(back_populates="business", cascade="all, delete-orphan")
+    leads: Mapped[list["Lead"]] = relationship(
+        back_populates="business",
+        cascade="all, delete-orphan",
+        primaryjoin="and_(Business.id == Lead.business_id, Business.workspace_id == Lead.workspace_id)",
+        foreign_keys="[Lead.business_id, Lead.workspace_id]",
+    )
 
     __table_args__ = (
+        CheckConstraint(
+            "(provider IS NULL AND source_key IS NULL) OR (provider IS NOT NULL AND source_key IS NOT NULL)",
+            name="identity_pair",
+        ),
+        CheckConstraint(
+            "provider IS NULL OR provider IN ('google_places', 'tavily', 'csv_import')",
+            name="provider_domain",
+        ),
+        CheckConstraint(
+            "provider IS DISTINCT FROM 'google_places' OR "
+            "(place_id IS NOT NULL AND length(btrim(place_id)) > 0 AND "
+            "source_key IS NOT NULL AND length(btrim(source_key)) > 0 AND place_id = source_key)",
+            name="google_place_identity_matches",
+        ),
         UniqueConstraint("workspace_id", "place_id", name="uq_business_workspace_place"),
+        UniqueConstraint("workspace_id", "id", name="uq_businesses_workspace_id"),
+        UniqueConstraint("workspace_id", "provider", "source_key", name="uq_business_workspace_provider_source"),
     )
 
 
@@ -86,9 +111,7 @@ class Lead(Base):
     workspace_id: Mapped[uuid.UUID] = mapped_column(
         PG_UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    business_id: Mapped[uuid.UUID] = mapped_column(
-        PG_UUID(as_uuid=True), ForeignKey("businesses.id", ondelete="CASCADE"), nullable=False, index=True
-    )
+    business_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False, index=True)
     source_run_id: Mapped[uuid.UUID | None] = mapped_column(
         PG_UUID(as_uuid=True), ForeignKey("prospection_runs.id", ondelete="SET NULL"), nullable=True, index=True
     )
@@ -140,7 +163,11 @@ class Lead(Base):
         nullable=False,
     )
 
-    business: Mapped["Business"] = relationship(back_populates="leads")
+    business: Mapped["Business"] = relationship(
+        back_populates="leads",
+        primaryjoin="and_(Lead.business_id == Business.id, Lead.workspace_id == Business.workspace_id)",
+        foreign_keys="[Lead.business_id, Lead.workspace_id]",
+    )
     setter: Mapped["User | None"] = relationship(
         "User", foreign_keys=[setter_id], lazy="joined"
     )
@@ -168,6 +195,11 @@ class Lead(Base):
 
     __table_args__ = (
         UniqueConstraint("workspace_id", "business_id", name="uq_lead_workspace_business"),
+        UniqueConstraint("workspace_id", "id", name="uq_leads_workspace_id"),
+        ForeignKeyConstraint(
+            ["workspace_id", "business_id"], ["businesses.workspace_id", "businesses.id"],
+            name="fk_leads_business_tenant", ondelete="CASCADE",
+        ),
         Index("ix_leads_workspace_setter", "workspace_id", "setter_id"),
         Index("ix_leads_workspace_closer", "workspace_id", "closer_id"),
         Index("ix_leads_validation_status", "validation_status"),

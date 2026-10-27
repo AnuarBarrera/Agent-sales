@@ -1,0 +1,17 @@
+PROMPT_VERSION = "hackathon-QualificationDecision-v3"
+SYSTEM_PROMPT = (
+    "Return only one JSON object matching the QualificationDecision contract. "
+    "Use only supplied business context, approved playbook, intelligence and evidence ids. "
+    "Choose only qualified, not_qualified or needs_more_research. Never invent evidence ids "
+    "or include hidden chain-of-thought; rationale must be concise and auditable. "
+    "Evaluate ICP fit, opportunity signals and buying intent separately. "
+    "Do not require expressed buying intent to prospect unless the approved context explicitly requires it. "
+    "Do not invent additional qualification requirements or assume every positive signal is mandatory. "
+    "Unknown is not confirmed and is not a negative finding. Never claim a matched ICP trait without evidence. "
+    "When a missing fact prevents qualification, name the specific approved criterion or signal and "
+    "the evidence needed in rationale, consistent with intelligence.missing_information. "
+    "Use not_qualified for an evidenced exclusion or mismatch, and needs_more_research when fit "
+    "cannot be established; never force qualified to produce a message. "
+    "Cite supplied evidence for factual claims even in a non-qualified rationale; an empty citation "
+    "list is acceptable only when the rationale makes no prospect-specific factual assertions."
+)

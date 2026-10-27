@@ -1,23 +1,51 @@
-# Python
-backend/.venv/
-backend/**/__pycache__/
-backend/.pytest_cache/
-backend/.mypy_cache/
-backend/.ruff_cache/
-*.py[cod]
-
-# Node / build output
-frontend/node_modules/
-frontend/dist/
-frontend/test-results/
-frontend/.vite/
-
-# Local configuration and secrets
+# Private configuration and credentials
 .env
 .env.*
 !.env.example
+.aws/
+.ssh/
+*.pem
+*.key
+*.p12
+.npmrc
 
-#Local Documentation
+# Dependencies, build output and caches
+**/node_modules/
+**/dist/
+**/.venv/
+**/__pycache__/
+*.py[cod]
+*.tsbuildinfo
+**/*.egg-info/
+**/.pytest_cache/
+**/.ruff_cache/
+**/.mypy_cache/
+**/.vite/
 
-/docs
-/documentosIniciales
+# Local reports, fixtures and working copies
+.worktrees/
+.codex/
+.agents/
+.claude/
+.superpowers/
+.private/
+.local/
+/docs/
+/manual.md
+/documentosIniciales/
+/hackathon-demo-audit/
+/hackathon-demo-exit.md
+/backend/tests/
+/backend/scripts/
+/frontend/tests/
+/frontend/e2e/
+/frontend/test-results/
+/frontend/playwright-report/
+/frontend/src/test/
+**/*.test.*
+**/*.spec.*
+**/*.fixtures.*
+*.log
+*.dump
+*.backup
+*.bundle

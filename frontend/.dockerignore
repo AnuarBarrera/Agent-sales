@@ -1,0 +1,17 @@
+*
+!Dockerfile
+!package.json
+!package-lock.json
+!index.html
+!nginx.conf
+!postcss.config.js
+!tailwind.config.js
+!tsconfig.json
+!tsconfig.node.json
+!vite.config.ts
+!src/
+!src/**
+src/**/*.test.*
+src/**/*.spec.*
+src/**/*.fixtures.*
+src/test/

@@ -31,6 +31,7 @@ class ActivitiesService:
         content: str,
         author_id: UUID,
         related_id: UUID | None = None,
+        activity_id: UUID | None = None,
     ) -> Activity:
         """Create a new activity."""
         lead = self.db.execute(
@@ -42,6 +43,7 @@ class ActivitiesService:
         if not can_view_lead(membership, lead):
             raise PermissionError("Not authorized to add activity to this lead")
         activity = Activity(
+            id=activity_id,
             workspace_id=workspace_id,
             lead_id=lead_id,
             type=activity_type,
@@ -175,9 +177,11 @@ class ActivitiesService:
         priority: str = "medium",
         due_at: datetime | None = None,
         source_activity_id: UUID | None = None,
+        task_id: UUID | None = None,
     ) -> FollowUpTask:
         """Create a follow-up task."""
         task = FollowUpTask(
+            id=task_id,
             workspace_id=workspace_id,
             lead_id=lead_id,
             assignee_id=assignee_id,

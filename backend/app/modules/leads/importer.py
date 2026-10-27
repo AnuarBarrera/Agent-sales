@@ -63,6 +63,12 @@ def apply_imported_row(business: object, lead: object, row: ImportedLeadRow) -> 
         if value is not None:
             setattr(business, field, value)
 
+    if getattr(business, "provider", None) != "google_places":
+        business.provider = "csv_import"
+        business.source_key = row.place_id
+    if getattr(business, "place_id", None) is None:
+        business.place_id = row.place_id
+
     lead_fields = {
         "profile": row.profile,
         "validation_status": row.validation_status if row.validation_status != "pending" else None,
@@ -322,6 +328,8 @@ def import_lead_rows(db: Session, workspace_id: object, rows: list[ImportedLeadR
             business = Business(
                 workspace_id=workspace_id,
                 place_id=row.place_id,
+                provider="csv_import",
+                source_key=row.place_id,
                 name=row.name,
             )
             db.add(business)

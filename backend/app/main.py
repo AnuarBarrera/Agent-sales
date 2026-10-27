@@ -1,5 +1,7 @@
+import logging
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
+from pathlib import Path
 from uuid import UUID
 
 from fastapi import FastAPI, Request, Response
@@ -8,18 +10,29 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from app.core.config import get_settings
+from app.core.release_identity import process_release_identity
 from app.core.security import verify_csrf_token
 from app.modules.activities.router import router as activities_router
 from app.modules.admin.router import router as admin_router
 from app.modules.calls.router import router as calls_router
+from app.modules.demo.auth_router import router as demo_auth_router
+from app.modules.demo.router import router as demo_router
 from app.modules.identity.router import router as identity_router
+from app.modules.lead_fit.router import evaluation_router as lead_fit_evaluation_router
+from app.modules.lead_fit.router import router as lead_fit_router
 from app.modules.leads.router import router as leads_router
 from app.modules.notifications.router import router as notifications_router
 from app.modules.outreach.router import router as outreach_router
 from app.modules.pipeline.router import router as pipeline_router
+from app.modules.prospect_analysis.router import router as prospect_analysis_router
+from app.modules.prospect_research.router import router as prospect_research_router
 from app.modules.prospection.router import router as prospection_router
 from app.modules.rag.router import router as rag_router
+from app.modules.sales_playbook.documents_router import router as sales_playbook_documents_router
+from app.modules.sales_playbook.execution_budget import ExecutionBudgetPolicy
+from app.modules.sales_playbook.router import router as sales_playbook_router
 from app.modules.seller_profile.router import router as seller_profile_router
+from app.modules.setter.router import router as setter_router
 
 
 class HealthResponse(BaseModel):
@@ -31,11 +44,23 @@ class ErrorEnvelope(BaseModel):
 
 
 settings = get_settings()
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Startup
+    identity = process_release_identity(
+        Path(__file__).resolve().parents[1],
+        role="api",
+        build_revision=settings.app_build_revision,
+        manifest_path=Path("/opt/app-build/build_manifest.json"),
+    )
+    logger.info("runtime_release_identity", extra={"release_identity": identity})
+    logger.info(
+        "sales_playbook_execution_budget",
+        extra={"execution_budget": ExecutionBudgetPolicy.from_settings(settings).to_dict()},
+    )
     yield
     # Shutdown
 
@@ -109,8 +134,14 @@ async def api_health_check() -> HealthResponse:
 
 # Import and include routers here as they are created
 app.include_router(identity_router, prefix=settings.api_prefix)
+app.include_router(demo_auth_router, prefix=settings.api_prefix)
+app.include_router(demo_router, prefix=settings.api_prefix)
+app.include_router(lead_fit_router, prefix=settings.api_prefix)
+app.include_router(lead_fit_evaluation_router, prefix=settings.api_prefix)
 app.include_router(pipeline_router, prefix=settings.api_prefix)
 app.include_router(prospection_router, prefix=settings.api_prefix)
+app.include_router(prospect_research_router, prefix=settings.api_prefix)
+app.include_router(prospect_analysis_router, prefix=settings.api_prefix)
 app.include_router(leads_router, prefix=settings.api_prefix)
 app.include_router(activities_router, prefix=settings.api_prefix)
 app.include_router(admin_router, prefix=settings.api_prefix)
@@ -119,3 +150,6 @@ app.include_router(notifications_router, prefix=settings.api_prefix)
 app.include_router(outreach_router, prefix=settings.api_prefix)
 app.include_router(rag_router, prefix=settings.api_prefix)
 app.include_router(seller_profile_router, prefix=settings.api_prefix)
+app.include_router(sales_playbook_router, prefix=settings.api_prefix)
+app.include_router(sales_playbook_documents_router, prefix=settings.api_prefix)
+app.include_router(setter_router, prefix=settings.api_prefix)

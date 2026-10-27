@@ -1,3 +1,5 @@
+import math
+import re
 from dataclasses import dataclass
 
 import httpx
@@ -27,6 +29,7 @@ class PlacesQuery:
     center_longitude: float
     radius_km: float | None = None
     polygon_geometry: str | None = None  # GeoJSON
+    max_results: int | None = None
 
 
 class PlacesProviderError(Exception):
@@ -43,18 +46,37 @@ class PlacesProviderRateLimit(PlacesProviderError):
 
 
 class GooglePlacesProvider:
-    """Google Places API provider implementation."""
+    """Places API New adapter; consumers keep the canonical PlaceCandidate."""
 
-    def __init__(self, api_key: str | None = None, timeout: float = 30.0):
+    _FIELDS = (
+        "id", "displayName", "formattedAddress", "location", "nationalPhoneNumber",
+        "websiteUri", "rating", "userRatingCount",
+    )
+    _EARTH_RADIUS_KM = 6371.0088
+
+    def __init__(
+        self,
+        api_key: str | None = None,
+        timeout: float = 30.0,
+        max_results: int | None = None,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ):
         settings = get_settings()
+        maximum = settings.google_places_max_results if max_results is None else max_results
+        if type(maximum) is not int or not 1 <= maximum <= 60:
+            raise ValueError("Google Places result budget must be an integer from 1 to 60")
+        self.max_results = maximum
         self.api_key = api_key or settings.google_places_api_key
         self.timeout = timeout
-        self.base_url = "https://maps.googleapis.com/maps/api/place"
+        self.base_url = "https://places.googleapis.com/v1/places"
+        self.transport = transport
         self._client: httpx.AsyncClient | None = None
 
     async def _get_client(self) -> httpx.AsyncClient:
         if self._client is None or self._client.is_closed:
-            self._client = httpx.AsyncClient(timeout=self.timeout)
+            self._client = httpx.AsyncClient(
+                timeout=self.timeout, trust_env=False, transport=self.transport,
+            )
         return self._client
 
     async def close(self) -> None:
@@ -62,161 +84,141 @@ class GooglePlacesProvider:
             await self._client.aclose()
 
     async def search(self, query: PlacesQuery) -> list[PlaceCandidate]:
-        """Search for places using Google Places Nearby Search."""
+        """Search free-text business categories within the selected radius."""
+        maximum = self.max_results if query.max_results is None else query.max_results
+        if type(maximum) is not int or not 1 <= maximum <= (60 if query.max_results is None else 10):
+            raise PlacesProviderError("Invalid Google Places result budget")
+        rectangle, radius = self._search_bounds(query)
+        payload = {
+            "textQuery": query.giro.strip(), "languageCode": "es",
+            "pageSize": min(20, maximum),
+            "locationRestriction": {"rectangle": rectangle},
+        }
+        fields = self._FIELDS
+        if query.max_results is not None:
+            fields += ("primaryType", "primaryTypeDisplayName")
+        field_mask = ",".join(f"places.{field}" for field in fields) + ",nextPageToken"
+        candidates = []
+        seen_tokens: set[str] = set()
+        for _ in range(3):
+            data = await self._request("POST", ":searchText", field_mask, json=payload)
+            rows = data.get("places", [])
+            token = data.get("nextPageToken")
+            if not isinstance(rows, list) or (token is not None and not isinstance(token, str)):
+                raise PlacesProviderError("Google Places returned an invalid search response")
+            for row in rows:
+                candidate = self._parse_place(row)
+                if self._within_radius(candidate, query, radius):
+                    candidates.append(candidate)
+            if len(candidates) >= maximum or not token:
+                break
+            if token in seen_tokens:
+                raise PlacesProviderError("Google Places returned a repeated page token")
+            seen_tokens.add(token)
+            payload["pageToken"] = token
+        return candidates[:maximum]
+
+    async def _request(self, method: str, path: str, field_mask: str, **kwargs) -> dict:
+        """Never echo Google bodies, headers, URLs or credential-bearing exceptions."""
         if not self.api_key:
             raise PlacesProviderError("Google Places API key not configured")
-
         client = await self._get_client()
-
-        # Build location and radius parameters
-        location = f"{query.center_latitude},{query.center_longitude}"
-        radius = int((query.radius_km or 5.0) * 1000)  # Convert km to meters
-
-        # Build keyword from giro
-        keyword = query.giro
-
-        params: dict[str, str] = {
-            "key": self.api_key,
-            "location": location,
-            "radius": str(radius),
-            "keyword": keyword,
-            "language": "es",
-        }
-
         try:
-            response = await client.get(
-                f"{self.base_url}/nearbysearch/json",
-                params=params,
+            response = await client.request(
+                method, f"{self.base_url}{path}",
+                headers={"X-Goog-Api-Key": self.api_key, "X-Goog-FieldMask": field_mask},
+                **kwargs,
             )
             response.raise_for_status()
             data = response.json()
-        except httpx.TimeoutException as e:
-            raise PlacesProviderTimeout("Google Places request timed out") from e
-        except httpx.HTTPStatusError as e:
-            if e.response.status_code == 429:
-                raise PlacesProviderRateLimit("Google Places rate limit exceeded") from e
-            raise PlacesProviderError(f"Google Places API error: {e.response.text}") from e
-
-        status = data.get("status")
-        if status == "ZERO_RESULTS":
-            return []
-        elif status != "OK":
-            raise PlacesProviderError(f"Google Places API returned status: {status}")
-
-        candidates = []
-        for place in data.get("results", []):
-            candidate = self._parse_place(place)
-            candidates.append(candidate)
-
-        # Handle pagination if needed
-        next_page_token = data.get("next_page_token")
-        while next_page_token:
-            await self._wait_for_next_page()
-            page_candidates = await self._fetch_next_page(next_page_token)
-            candidates.extend(page_candidates)
-            # In practice, you'd get a new token from the response
-
-        return candidates
-
-    async def _wait_for_next_page(self) -> None:
-        """Wait before requesting next page (Google requires a short delay)."""
-        import asyncio
-        await asyncio.sleep(2)
-
-    async def _fetch_next_page(self, page_token: str) -> list[PlaceCandidate]:
-        if not self.api_key:
-            raise PlacesProviderError("Google Places API key not configured")
-
-        client = await self._get_client()
-        params: dict[str, str] = {
-            "key": self.api_key,
-            "pagetoken": page_token,
-        }
-
-        try:
-            response = await client.get(
-                f"{self.base_url}/nearbysearch/json",
-                params=params,
-            )
-            response.raise_for_status()
-            data = response.json()
-        except httpx.TimeoutException as e:
-            raise PlacesProviderTimeout("Google Places request timed out") from e
-        except httpx.HTTPStatusError as e:
-            if e.response.status_code == 429:
-                raise PlacesProviderRateLimit("Google Places rate limit exceeded") from e
-            raise PlacesProviderError(f"Google Places API error: {e.response.text}") from e
-
-        status = data.get("status")
-        if status != "OK":
-            return []
-
-        candidates = []
-        for place in data.get("results", []):
-            candidate = self._parse_place(place)
-            candidates.append(candidate)
-
-        return candidates
+        except httpx.TimeoutException:
+            raise PlacesProviderTimeout("Google Places request timed out") from None
+        except httpx.HTTPStatusError as error:
+            code = error.response.status_code
+            exception = PlacesProviderRateLimit if code == 429 else PlacesProviderError
+            raise exception(f"Google Places API New returned HTTP {code}") from None
+        except httpx.RequestError:
+            raise PlacesProviderError("Google Places transport failed") from None
+        except ValueError:
+            raise PlacesProviderError("Google Places returned invalid JSON") from None
+        if not isinstance(data, dict) or any(key in data for key in ("error", "status", "results")):
+            raise PlacesProviderError("Google Places returned an invalid API New response")
+        return data
 
     async def details(self, place_id: str) -> PlaceCandidate:
-        """Get detailed information for a specific place."""
-        if not self.api_key:
-            raise PlacesProviderError("Google Places API key not configured")
+        """Get contacts without falling back to the Legacy API."""
+        if not isinstance(place_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]+", place_id):
+            raise PlacesProviderError("Invalid Google Place ID")
+        data = await self._request(
+            "GET", f"/{place_id}", ",".join(self._FIELDS), params={"languageCode": "es"},
+        )
+        candidate = self._parse_place(data)
+        if candidate.place_id != place_id:
+            raise PlacesProviderError("Google Places returned a different Place ID")
+        return candidate
 
-        client = await self._get_client()
+    @staticmethod
+    def _coordinate(value, limit: float) -> bool:
+        return type(value) in (int, float) and math.isfinite(value) and -limit <= value <= limit
 
-        params: dict[str, str] = {
-            "key": self.api_key,
-            "place_id": place_id,
-            "fields": "place_id,name,formatted_address,formatted_phone_number,website,rating,user_ratings_total,geometry",
-            "language": "es",
-        }
-
-        try:
-            response = await client.get(
-                f"{self.base_url}/details/json",
-                params=params,
-            )
-            response.raise_for_status()
-            data = response.json()
-        except httpx.TimeoutException as e:
-            raise PlacesProviderTimeout("Google Places request timed out") from e
-        except httpx.HTTPStatusError as e:
-            if e.response.status_code == 429:
-                raise PlacesProviderRateLimit("Google Places rate limit exceeded") from e
-            raise PlacesProviderError(f"Google Places API error: {e.response.text}") from e
-
-        status = data.get("status")
-        if status != "OK":
-            raise PlacesProviderError(f"Google Places API returned status: {status}")
-
-        result = data.get("result", {})
-        return self._parse_place(result, is_detail=True)
-
-    def _parse_place(self, place: dict, is_detail: bool = False) -> PlaceCandidate:
-        geometry = place.get("geometry", {})
-        location = geometry.get("location", {}) if geometry else {}
-
-        # Handle different field names between search and details
-        if is_detail:
-            address = place.get("formatted_address")
-            phone = place.get("formatted_phone_number")
-            website = place.get("website")
+    def _search_bounds(self, query: PlacesQuery) -> tuple[dict, float]:
+        latitude, longitude = query.center_latitude, query.center_longitude
+        radius = 5.0 if query.radius_km is None else query.radius_km
+        if (
+            not self._coordinate(latitude, 90) or not self._coordinate(longitude, 180)
+            or type(radius) not in (int, float) or not math.isfinite(radius) or not 0 < radius <= 50
+            or not isinstance(query.giro, str) or not query.giro.strip()
+        ):
+            raise PlacesProviderError("Invalid Google Places search geography or text")
+        angle = radius / self._EARTH_RADIUS_KM
+        delta_lat = math.degrees(angle)
+        low_lat, high_lat = max(-90, latitude - delta_lat), min(90, latitude + delta_lat)
+        if low_lat == -90 or high_lat == 90:
+            low_lng, high_lng = -180, 180
         else:
-            address = place.get("vicinity") or place.get("formatted_address")
-            phone = None
-            website = None
+            delta_lng = math.degrees(math.asin(min(1, math.sin(angle) / math.cos(math.radians(latitude)))))
+            low_lng = (longitude - delta_lng + 180) % 360 - 180
+            high_lng = (longitude + delta_lng + 180) % 360 - 180
+        return {
+            "low": {"latitude": low_lat, "longitude": low_lng},
+            "high": {"latitude": high_lat, "longitude": high_lng},
+        }, radius
 
+    def _within_radius(self, place: PlaceCandidate, query: PlacesQuery, radius: float) -> bool:
+        latitude, longitude = math.radians(place.latitude), math.radians(place.longitude)
+        center_latitude = math.radians(query.center_latitude)
+        distance_term = (
+            math.sin((latitude - center_latitude) / 2) ** 2
+            + math.cos(latitude) * math.cos(center_latitude)
+            * math.sin((longitude - math.radians(query.center_longitude)) / 2) ** 2
+        )
+        distance = 2 * self._EARTH_RADIUS_KM * math.asin(math.sqrt(min(1, max(0, distance_term))))
+        return distance <= radius + 1e-9
+
+    def _parse_place(self, place: dict) -> PlaceCandidate:
+        if not isinstance(place, dict):
+            raise PlacesProviderError("Google Places returned an invalid place")
+        identifier = place.get("id")
+        display_name = place.get("displayName")
+        location = place.get("location")
+        if (
+            not isinstance(identifier, str) or not re.fullmatch(r"[A-Za-z0-9_-]+", identifier)
+            or not isinstance(display_name, dict) or not isinstance(display_name.get("text"), str)
+            or not display_name["text"].strip() or not isinstance(location, dict)
+            or not self._coordinate(location.get("latitude"), 90)
+            or not self._coordinate(location.get("longitude"), 180)
+        ):
+            raise PlacesProviderError("Google Places returned an invalid place identity or location")
         return PlaceCandidate(
-            place_id=place.get("place_id", ""),
-            name=place.get("name", ""),
-            address=address,
-            phone=phone,
-            website=website,
+            place_id=identifier,
+            name=display_name["text"],
+            address=place.get("formattedAddress"),
+            phone=place.get("nationalPhoneNumber"),
+            website=place.get("websiteUri"),
             rating=place.get("rating"),
-            reviews_total=place.get("user_ratings_total"),
-            latitude=location.get("lat"),
-            longitude=location.get("lng"),
+            reviews_total=place.get("userRatingCount"),
+            latitude=location["latitude"],
+            longitude=location["longitude"],
             raw_provider_data=place,
         )
 

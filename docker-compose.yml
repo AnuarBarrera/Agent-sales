@@ -9,7 +9,7 @@ services:
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: tuwebmx_crm
     ports:
-      - "5434:5432"
+      - "127.0.0.1:5434:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -22,7 +22,7 @@ services:
     image: redis:7-alpine
     container_name: tuwebmx-crm-redis
     ports:
-      - "6380:6379"
+      - "127.0.0.1:6380:6379"
     volumes:
       - redis_data:/data
     healthcheck:
@@ -31,79 +31,166 @@ services:
       timeout: 5s
       retries: 5
 
-  minio:
-    image: quay.io/minio/minio:latest
-    container_name: tuwebmx-crm-minio
-    command: server /data --console-address ":9001"
+  garage:
+    image: dxflrs/garage:v2.3.0
+    container_name: tuwebmx-crm-garage
+    entrypoint: ["/garage"]
+    command: ["server", "--single-node", "--default-bucket"]
     environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
+      GARAGE_RPC_SECRET: ${GARAGE_RPC_SECRET:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}
+      GARAGE_DEFAULT_ACCESS_KEY: ${GARAGE_DEFAULT_ACCESS_KEY:-GK00000000000000000000000000000000}
+      GARAGE_DEFAULT_SECRET_KEY: ${GARAGE_DEFAULT_SECRET_KEY:-0000000000000000000000000000000000000000000000000000000000000000}
+      GARAGE_DEFAULT_BUCKET: ${STORAGE_BUCKET:-tuwebmx-crm}
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "127.0.0.1:3900:3900"
     volumes:
-      - minio_data:/data
+      - ./garage.toml:/etc/garage.toml:ro
+      - garage_meta:/var/lib/garage/meta
+      - garage_data:/var/lib/garage/data
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
-      interval: 30s
-      timeout: 20s
-      retries: 3
+      test: ["CMD", "/garage", "status"]
+      interval: 5s
+      timeout: 10s
+      retries: 20
+      start_period: 10s
 
   api:
     build:
       context: ./backend
       dockerfile: Dockerfile
+      args:
+        APP_BUILD_REVISION: ${APP_BUILD_REVISION:-unknown}
     container_name: tuwebmx-crm-api
     environment:
+      APP_BUILD_REVISION: ${APP_BUILD_REVISION:-unknown}
       DATABASE_URL: postgresql+psycopg://postgres:postgres@postgres:5432/tuwebmx_crm
       REDIS_URL: redis://redis:6379/0
-      SECRET_KEY: dev-secret-key-change-in-production
+      SECRET_KEY: ${SECRET_KEY:?Configure SECRET_KEY in the private environment}
       ENVIRONMENT: development
-      STORAGE_ENDPOINT: http://minio:9000
-      STORAGE_ACCESS_KEY: minioadmin
-      STORAGE_SECRET_KEY: minioadmin
-      STORAGE_BUCKET: tuwebmx-crm
+      APP_RUNTIME_ROLE: api
+      DEMO_PUBLIC_MODE: ${DEMO_PUBLIC_MODE:-false}
+      DEMO_PUBLIC_ORIGIN: ${DEMO_PUBLIC_ORIGIN:-}
+      DEMO_GLOBAL_SEARCH_LIMIT: ${DEMO_GLOBAL_SEARCH_LIMIT:-40}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      COOKIE_SAMESITE: ${COOKIE_SAMESITE:-lax}
+      CORS_ORIGINS: '${CORS_ORIGINS:-["http://localhost:5173","http://localhost:3000"]}'
+      DEMO_OTP_HMAC_KEY: ${DEMO_OTP_HMAC_KEY:-}
+      MAILGUN_API_KEY: ${MAILGUN_API_KEY:-}
+      MAILGUN_DOMAIN: ${MAILGUN_DOMAIN:-}
+      MAILGUN_SENDER_EMAIL: ${MAILGUN_SENDER_EMAIL:-}
+      MAILGUN_REGION: ${MAILGUN_REGION:-us}
+      STORAGE_ENDPOINT: http://garage:3900
+      STORAGE_ACCESS_KEY: ${GARAGE_DEFAULT_ACCESS_KEY:-GK00000000000000000000000000000000}
+      STORAGE_SECRET_KEY: ${GARAGE_DEFAULT_SECRET_KEY:-0000000000000000000000000000000000000000000000000000000000000000}
+      STORAGE_BUCKET: ${STORAGE_BUCKET:-tuwebmx-crm}
+      STORAGE_REGION: us-east-1
       GOOGLE_PLACES_API_KEY: ${GOOGLE_PLACES_API_KEY:-}
       GOOGLE_GEOCODING_API_KEY: ${GOOGLE_GEOCODING_API_KEY:-}
       LLM_API_URL: ${LLM_API_URL:-https://api.openai.com/v1}
       LLM_API_KEY: ${LLM_API_KEY:-}
       LLM_MODEL: ${LLM_MODEL:-gpt-4o-mini}
+      LEAD_FIT_ENABLED: ${LEAD_FIT_ENABLED:-false}
+      JEV_ENABLED: ${JEV_ENABLED:-false}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      JEV_MODEL: ${JEV_MODEL:-typesafe/jev-1.14}
+      JEV_AUTHORIZED_MODELS: '${JEV_AUTHORIZED_MODELS:-["typesafe/jev-1.14"]}'
+      NEBIUS_ENABLED: ${NEBIUS_ENABLED:-false}
+      NEBIUS_API_KEY: ${NEBIUS_API_KEY:-}
+      NEBIUS_BASE_URL: ${NEBIUS_BASE_URL:-https://api.tokenfactory.nebius.com/v1}
+      NEBIUS_MODEL: ${NEBIUS_MODEL:-nvidia/nemotron-3-super-120b-a12b}
+      NEBIUS_AI_PROJECT_ID: ${NEBIUS_AI_PROJECT_ID:-}
+      NEBIUS_TIMEOUT_SECONDS: ${NEBIUS_TIMEOUT_SECONDS:-60}
+      SALES_PLAYBOOK_LLM_MODEL: ${SALES_PLAYBOOK_LLM_MODEL:-Qwen/Qwen3-30B-A3B-Instruct-2507}
+      SALES_PLAYBOOK_LLM_TIMEOUT_SECONDS: ${SALES_PLAYBOOK_LLM_TIMEOUT_SECONDS:-120}
+      SALES_PLAYBOOK_LLM_MAX_COMPLETION_TOKENS: ${SALES_PLAYBOOK_LLM_MAX_COMPLETION_TOKENS:-4096}
+      SALES_PLAYBOOK_MAX_PROVIDER_ATTEMPTS: ${SALES_PLAYBOOK_MAX_PROVIDER_ATTEMPTS:-24}
+      SALES_PLAYBOOK_MAX_OPERATIONS: ${SALES_PLAYBOOK_MAX_OPERATIONS:-24}
+      SALES_PLAYBOOK_MAX_DYNAMIC_OPERATIONS: ${SALES_PLAYBOOK_MAX_DYNAMIC_OPERATIONS:-3}
+      SALES_PLAYBOOK_EXECUTION_DEADLINE_SECONDS: ${SALES_PLAYBOOK_EXECUTION_DEADLINE_SECONDS:-3180}
+      SALES_PLAYBOOK_CLOSEOUT_RESERVE_SECONDS: ${SALES_PLAYBOOK_CLOSEOUT_RESERVE_SECONDS:-300}
+      SALES_PLAYBOOK_RQ_TERMINATION_GRACE_SECONDS: ${SALES_PLAYBOOK_RQ_TERMINATION_GRACE_SECONDS:-30}
+      TAVILY_ENABLED: ${TAVILY_ENABLED:-false}
+      TAVILY_API_KEY: ${TAVILY_API_KEY:-}
+      TAVILY_BASE_URL: ${TAVILY_BASE_URL:-https://api.tavily.com}
+      TAVILY_TIMEOUT_SECONDS: ${TAVILY_TIMEOUT_SECONDS:-20}
+      TAVILY_SEARCH_DEPTH: ${TAVILY_SEARCH_DEPTH:-basic}
+      TAVILY_MAX_RESULTS: ${TAVILY_MAX_RESULTS:-5}
+      TAVILY_MAX_EXTRACT_URLS: ${TAVILY_MAX_EXTRACT_URLS:-1}
+      TAVILY_CACHE_HOURS: ${TAVILY_CACHE_HOURS:-24}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-3-small}
       TRANSCRIPTION_API_URL: ${TRANSCRIPTION_API_URL:-https://api.openai.com/v1/audio/transcriptions}
       TRANSCRIPTION_API_KEY: ${TRANSCRIPTION_API_KEY:-}
       TRANSCRIPTION_MODEL: ${TRANSCRIPTION_MODEL:-whisper-1}
     ports:
-      - "8001:8000"
+      - "127.0.0.1:8001:8000"
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
-      minio:
+      garage:
         condition: service_healthy
-    volumes:
-      - ./backend:/app
-    command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+    command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"
 
   worker:
+    restart: unless-stopped
     build:
       context: ./backend
       dockerfile: Dockerfile
+      args:
+        APP_BUILD_REVISION: ${APP_BUILD_REVISION:-unknown}
     container_name: tuwebmx-crm-worker
     environment:
+      APP_BUILD_REVISION: ${APP_BUILD_REVISION:-unknown}
       DATABASE_URL: postgresql+psycopg://postgres:postgres@postgres:5432/tuwebmx_crm
       REDIS_URL: redis://redis:6379/0
-      SECRET_KEY: dev-secret-key-change-in-production
+      SECRET_KEY: ${SECRET_KEY:?Configure SECRET_KEY in the private environment}
       ENVIRONMENT: development
-      STORAGE_ENDPOINT: http://minio:9000
-      STORAGE_ACCESS_KEY: minioadmin
-      STORAGE_SECRET_KEY: minioadmin
-      STORAGE_BUCKET: tuwebmx-crm
+      APP_RUNTIME_ROLE: worker
+      DEMO_PUBLIC_MODE: ${DEMO_PUBLIC_MODE:-false}
+      DEMO_PUBLIC_ORIGIN: ${DEMO_PUBLIC_ORIGIN:-}
+      DEMO_GLOBAL_SEARCH_LIMIT: ${DEMO_GLOBAL_SEARCH_LIMIT:-40}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      COOKIE_SAMESITE: ${COOKIE_SAMESITE:-lax}
+      CORS_ORIGINS: '${CORS_ORIGINS:-["http://localhost:5173","http://localhost:3000"]}'
+      STORAGE_ENDPOINT: http://garage:3900
+      STORAGE_ACCESS_KEY: ${GARAGE_DEFAULT_ACCESS_KEY:-GK00000000000000000000000000000000}
+      STORAGE_SECRET_KEY: ${GARAGE_DEFAULT_SECRET_KEY:-0000000000000000000000000000000000000000000000000000000000000000}
+      STORAGE_BUCKET: ${STORAGE_BUCKET:-tuwebmx-crm}
+      STORAGE_REGION: us-east-1
       GOOGLE_PLACES_API_KEY: ${GOOGLE_PLACES_API_KEY:-}
       GOOGLE_GEOCODING_API_KEY: ${GOOGLE_GEOCODING_API_KEY:-}
       LLM_API_URL: ${LLM_API_URL:-https://api.openai.com/v1}
       LLM_API_KEY: ${LLM_API_KEY:-}
       LLM_MODEL: ${LLM_MODEL:-gpt-4o-mini}
+      LEAD_FIT_ENABLED: ${LEAD_FIT_ENABLED:-false}
+      JEV_ENABLED: ${JEV_ENABLED:-false}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      JEV_MODEL: ${JEV_MODEL:-typesafe/jev-1.14}
+      JEV_AUTHORIZED_MODELS: '${JEV_AUTHORIZED_MODELS:-["typesafe/jev-1.14"]}'
+      NEBIUS_ENABLED: ${NEBIUS_ENABLED:-false}
+      NEBIUS_API_KEY: ${NEBIUS_API_KEY:-}
+      NEBIUS_BASE_URL: ${NEBIUS_BASE_URL:-https://api.tokenfactory.nebius.com/v1}
+      NEBIUS_MODEL: ${NEBIUS_MODEL:-nvidia/nemotron-3-super-120b-a12b}
+      NEBIUS_AI_PROJECT_ID: ${NEBIUS_AI_PROJECT_ID:-}
+      NEBIUS_TIMEOUT_SECONDS: ${NEBIUS_TIMEOUT_SECONDS:-60}
+      SALES_PLAYBOOK_LLM_MODEL: ${SALES_PLAYBOOK_LLM_MODEL:-Qwen/Qwen3-30B-A3B-Instruct-2507}
+      SALES_PLAYBOOK_LLM_TIMEOUT_SECONDS: ${SALES_PLAYBOOK_LLM_TIMEOUT_SECONDS:-120}
+      SALES_PLAYBOOK_LLM_MAX_COMPLETION_TOKENS: ${SALES_PLAYBOOK_LLM_MAX_COMPLETION_TOKENS:-4096}
+      SALES_PLAYBOOK_MAX_PROVIDER_ATTEMPTS: ${SALES_PLAYBOOK_MAX_PROVIDER_ATTEMPTS:-24}
+      SALES_PLAYBOOK_MAX_OPERATIONS: ${SALES_PLAYBOOK_MAX_OPERATIONS:-24}
+      SALES_PLAYBOOK_MAX_DYNAMIC_OPERATIONS: ${SALES_PLAYBOOK_MAX_DYNAMIC_OPERATIONS:-3}
+      SALES_PLAYBOOK_EXECUTION_DEADLINE_SECONDS: ${SALES_PLAYBOOK_EXECUTION_DEADLINE_SECONDS:-3180}
+      SALES_PLAYBOOK_CLOSEOUT_RESERVE_SECONDS: ${SALES_PLAYBOOK_CLOSEOUT_RESERVE_SECONDS:-300}
+      SALES_PLAYBOOK_RQ_TERMINATION_GRACE_SECONDS: ${SALES_PLAYBOOK_RQ_TERMINATION_GRACE_SECONDS:-30}
+      TAVILY_ENABLED: ${TAVILY_ENABLED:-false}
+      TAVILY_API_KEY: ${TAVILY_API_KEY:-}
+      TAVILY_BASE_URL: ${TAVILY_BASE_URL:-https://api.tavily.com}
+      TAVILY_TIMEOUT_SECONDS: ${TAVILY_TIMEOUT_SECONDS:-20}
+      TAVILY_SEARCH_DEPTH: ${TAVILY_SEARCH_DEPTH:-basic}
+      TAVILY_MAX_RESULTS: ${TAVILY_MAX_RESULTS:-5}
+      TAVILY_MAX_EXTRACT_URLS: ${TAVILY_MAX_EXTRACT_URLS:-1}
+      TAVILY_CACHE_HOURS: ${TAVILY_CACHE_HOURS:-24}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-3-small}
       TRANSCRIPTION_API_URL: ${TRANSCRIPTION_API_URL:-https://api.openai.com/v1/audio/transcriptions}
       TRANSCRIPTION_API_KEY: ${TRANSCRIPTION_API_KEY:-}
@@ -113,28 +200,24 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-      minio:
+      garage:
         condition: service_healthy
-    volumes:
-      - ./backend:/app
-    command: rq worker -u redis://redis:6379/0 default
+    command: rq worker --worker-class app.workers.run_worker.AttestingWorker -u redis://redis:6379/0 default
 
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        APP_BUILD_REVISION: ${APP_BUILD_REVISION:-unknown}
     container_name: tuwebmx-crm-frontend
     ports:
-      - "5173:5173"
-    environment:
-      VITE_API_PROXY_TARGET: http://api:8000
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
+      - "127.0.0.1:5173:80"
     depends_on:
       - api
 
 volumes:
   postgres_data:
   redis_data:
-  minio_data:
+  garage_meta:
+  garage_data:

@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, EmailStr, Field, model_validator
@@ -126,7 +127,13 @@ class AcceptInvitationRequest(BaseModel):
 
 
 # Current user info
+class CurrentUserDemo(BaseModel):
+    enabled: Literal[True] = True
+    workspace_id: UUID
+
+
 class CurrentUserResponse(BaseModel):
     user: UserRead
     workspace: WorkspaceRead
     membership: MembershipRead
+    demo: CurrentUserDemo | None = None

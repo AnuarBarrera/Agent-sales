@@ -3,7 +3,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from uuid import UUID
 
-from fastapi import APIRouter, Cookie, Depends, Header, HTTPException, Response, status
+from fastapi import APIRouter, Cookie, Depends, Header, HTTPException, Request, Response, status
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
@@ -12,6 +12,7 @@ from app.db.session import get_db
 from app.modules.identity.models import MembershipStatus, UserRole
 from app.modules.identity.schemas import (
     AcceptInvitationRequest,
+    CurrentUserDemo,
     CurrentUserResponse,
     InvitationCreate,
     InvitationRead,
@@ -32,6 +33,7 @@ settings = get_settings()
 
 
 def get_current_user(
+    request: Request,
     db: Session = Depends(get_db),
     authorization: str | None = Header(None),
     access_token_cookie: str | None = Cookie(None, alias="access_token"),
@@ -74,6 +76,14 @@ def get_current_user(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="No active membership in this workspace",
         )
+
+    # DB-derived demo ownership and the route allowlist apply independently of
+    # public-demo mode so disabling OTP cannot restore unrestricted admin access.
+    from app.modules.demo.access import enforce_demo_access, load_demo_principal
+
+    principal = load_demo_principal(db, user_id, workspace_id)
+    request.state.demo_principal = principal
+    enforce_demo_access(request, principal)
 
     return user_id, workspace_id, membership.role
 
@@ -144,6 +154,11 @@ def login(
     x_csrf_token: str | None = Header(None),
 ) -> TokenResponse:
     """Login user and return tokens."""
+    if settings.demo_public_mode:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Password login is disabled while public demo mode is enabled",
+        )
     # For now, skip CSRF on login as it's the first request
 
     service = IdentityService(db)
@@ -279,6 +294,7 @@ def logout(
 
 @auth_router.get("/me", response_model=CurrentUserResponse)
 def get_current_user_info(
+    request: Request,
     current_user: tuple[UUID, UUID, UserRole] = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> CurrentUserResponse:
@@ -290,10 +306,16 @@ def get_current_user_info(
     workspace = service.get_workspace_by_id(workspace_id)
     membership = service.get_active_membership(user_id, workspace_id)
 
+    principal = getattr(request.state, "demo_principal", None)
+    demo = None
+    if principal is not None and principal.user_id == user_id and principal.workspace_id == workspace_id:
+        demo = CurrentUserDemo(enabled=True, workspace_id=principal.workspace_id)
+
     return CurrentUserResponse(
         user=UserRead.model_validate(user),
         workspace=WorkspaceRead.model_validate(workspace),
         membership=MembershipRead.model_validate(membership),
+        demo=demo,
     )
 
 
@@ -367,6 +389,11 @@ def accept_invitation(
     db: Session = Depends(get_db),
 ) -> TokenResponse:
     """Accept an invitation and create user account."""
+    if settings.demo_public_mode:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Public invitations are disabled while public demo mode is enabled",
+        )
     service = IdentityService(db)
     invitation = service.get_invitation_by_token(invitation_data.token)
 

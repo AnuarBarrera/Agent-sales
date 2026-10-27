@@ -1,5 +1,6 @@
 import secrets
 from datetime import UTC, datetime, timedelta
+from threading import Lock
 
 from argon2 import PasswordHasher
 from jose import JWTError, jwt
@@ -13,6 +14,7 @@ ph = PasswordHasher()
 
 # CSRF token store (in production, use Redis)
 _csrf_tokens: dict[str, tuple[str, datetime]] = {}
+_csrf_lock = Lock()
 
 
 def hash_password(password: str) -> str:
@@ -58,26 +60,32 @@ def decode_token(token: str) -> dict | None:
 
 def generate_csrf_token(session_id: str) -> str:
     """Generate a CSRF token for a session."""
-    token = secrets.token_urlsafe(32)
-    expire = datetime.now(UTC) + timedelta(minutes=settings.csrf_token_expire_minutes)
-    _csrf_tokens[session_id] = (token, expire)
-    return token
+    with _csrf_lock:
+        existing = _csrf_tokens.get(session_id)
+        if existing and datetime.now(UTC) <= existing[1]:
+            return existing[0]
+        token = secrets.token_urlsafe(32)
+        expire = datetime.now(UTC) + timedelta(minutes=settings.csrf_token_expire_minutes)
+        _csrf_tokens[session_id] = (token, expire)
+        return token
 
 
 def verify_csrf_token(session_id: str, token: str) -> bool:
     """Verify a CSRF token."""
-    if session_id not in _csrf_tokens:
-        return False
-    stored_token, expire = _csrf_tokens[session_id]
-    if datetime.now(UTC) > expire:
-        del _csrf_tokens[session_id]
-        return False
-    return secrets.compare_digest(stored_token, token)
+    with _csrf_lock:
+        if session_id not in _csrf_tokens:
+            return False
+        stored_token, expire = _csrf_tokens[session_id]
+        if datetime.now(UTC) > expire:
+            del _csrf_tokens[session_id]
+            return False
+        return secrets.compare_digest(stored_token, token)
 
 
 def cleanup_expired_csrf_tokens() -> None:
     """Remove expired CSRF tokens."""
-    now = datetime.now(UTC)
-    expired = [sid for sid, (_, exp) in _csrf_tokens.items() if exp < now]
-    for sid in expired:
-        del _csrf_tokens[sid]
+    with _csrf_lock:
+        now = datetime.now(UTC)
+        expired = [sid for sid, (_, exp) in _csrf_tokens.items() if exp < now]
+        for sid in expired:
+            del _csrf_tokens[sid]

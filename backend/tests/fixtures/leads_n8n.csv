@@ -1,3 +1,0 @@
-Place ID,Nombre,Telefono,Direccion,Web,Rating,Resenias,Giro,Zona,WebStatus,WebDetalle,GooglePresence,MetaAds,Perfil,Score,Contactado,Fecha,Mensaje frío,Mensaje generado,Mensaje frío error
-test-import-place-001,Negocio Importado,5512345678,"Roma Norte, CDMX",https://example.com,4.8,120,clínicas,Roma Norte,valida,,primeras_posiciones,true,oro,9,false,2026-09-10T12:00:00+00:00,"Hola Negocio Importado",2026-09-10T12:05:00+00:00,
-test-import-place-001,Negocio Importado,5512345678,"Roma Norte, CDMX",https://example.com,4.8,120,clínicas,Roma Norte,valida,,primeras_posiciones,true,oro,9,false,2026-09-10T12:00:00+00:00,"Hola Negocio Importado",2026-09-10T12:05:00+00:00,
