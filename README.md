@@ -21,9 +21,10 @@ Agent Sales conecta las decisiones con la evidencia disponible y mantiene a la p
 3. **Descubrir y enriquecer negocios.** Seleccionar giro y zona en Maps; el worker incorpora evidencia web mediante Tavily antes de evaluar las condiciones con Jev.
 4. **Revisar resultados y fuentes.** Consultar identidad, contacto, condiciones evaluadas, evidencia y preguntas pendientes.
 5. **Preparar y aprobar un borrador.** Elegir correo o pitch de llamada según los canales disponibles. El texto requiere revisión humana antes de quedar listo para uso manual.
-6. **Dar seguimiento.** Registrar el contacto realizado y su resultado, guardar notas, programar tareas, completarlas y consultar el historial del lead.
+6. **Consultar a Nemotron.** Elegir hasta dos leads por participante y pulsar «Sugerir con IA». Nebius Token Factory genera una revisión breve, preguntas pendientes y un próximo paso a partir del contexto aprobado y hasta tres fuentes. La sugerencia no modifica la clasificación ni autoriza el contacto.
+7. **Dar seguimiento.** Registrar el contacto realizado y su resultado, guardar notas, programar tareas, completarlas y consultar el historial del lead.
 
-La demo permite **dos búsquedas por correo verificado**, con **hasta tres candidatos por búsqueda** y un borrador por lead. Son límites de uso: Maps y la evidencia disponible pueden producir menos resultados. La aplicación registra aprobaciones y seguimiento; el contacto se realiza manualmente.
+La demo permite **dos búsquedas por correo verificado**, con **hasta tres candidatos por búsqueda** y un borrador por lead. Son límites de uso: Maps y la evidencia disponible pueden producir menos resultados. La aplicación registra aprobaciones y seguimiento; el contacto se realiza manualmente. Las sugerencias de IA tienen **dos intentos por participante y uno por lead**, con un máximo de **2048 tokens de salida por intento**. Se reservan en PostgreSQL antes de llamar a Nebius; los fallos también consumen el intento y no hay reintentos automáticos. Volver a abrir una sugerencia consulta el resultado guardado sin inferencia adicional.
 
 ## Arquitectura
 

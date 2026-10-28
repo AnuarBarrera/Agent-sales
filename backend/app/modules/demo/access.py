@@ -43,6 +43,7 @@ _READ_PATHS = frozenset({
     "/pipeline/stages",
     "/demo/leads/{lead_id}/draft-review",
     "/demo/leads/{lead_id}/follow-up",
+    "/demo/leads/{lead_id}/ai-suggestion",
 })
 _WRITE_PATHS = frozenset({
     ("POST", "/auth/logout"), ("PUT", "/seller-profile"),
@@ -52,6 +53,7 @@ _WRITE_PATHS = frozenset({
     ("POST", "/lead-fit/policies/preview"), ("POST", "/lead-fit/policies"),
     ("POST", "/demo/searches"), ("POST", "/demo/leads/{lead_id}/draft"),
     ("POST", "/demo/leads/{lead_id}/draft-review"),
+    ("POST", "/demo/leads/{lead_id}/ai-suggestion"),
     ("POST", "/demo/leads/{lead_id}/follow-up/notes"),
     ("POST", "/demo/leads/{lead_id}/follow-up/contacts"),
     ("POST", "/demo/leads/{lead_id}/follow-up/tasks"),

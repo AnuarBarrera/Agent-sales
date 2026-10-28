@@ -11,9 +11,10 @@ from sqlalchemy import (
     Integer,
     LargeBinary,
     String,
+    Text,
     UniqueConstraint,
 )
-from sqlalchemy.dialects.postgresql import UUID as PG_UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -43,6 +44,34 @@ class DemoParticipant(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow
     )
+
+
+class DemoAiSuggestion(Base):
+    """One durable, non-retryable inference slot for a participant and lead."""
+
+    __tablename__ = "demo_ai_suggestions"
+    __table_args__ = (
+        UniqueConstraint("participant_id", "lead_id", name="uq_demo_ai_participant_lead"),
+        UniqueConstraint("participant_id", "slot", name="uq_demo_ai_participant_slot"),
+        CheckConstraint("slot IN (1, 2)", name="ck_demo_ai_slot"),
+        CheckConstraint("status IN ('reserved', 'completed', 'failed')", name="ck_demo_ai_status"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    participant_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("demo_participants.id", ondelete="RESTRICT"), nullable=False
+    )
+    lead_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("leads.id", ondelete="RESTRICT"), nullable=False
+    )
+    slot: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="reserved")
+    source_snapshot: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    content: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    generation_audit: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, nullable=False)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class DemoDraftApproval(Base):

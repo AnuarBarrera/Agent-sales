@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.db.session import get_db
 from app.modules.demo.access import load_demo_principal
+from app.modules.demo.ai_suggestions import DemoAiSuggestionService, SuggestionRead
 from app.modules.demo.errors import DemoError
 from app.modules.demo.models import DemoParticipant
 from app.modules.demo.quota import DemoQuotaRepository
@@ -37,6 +38,18 @@ from app.modules.setter.router import _read as read_execution
 from app.modules.setter.schemas import SetterExecutionRead
 
 router = APIRouter(prefix="/demo", tags=["demo"])
+
+
+@router.get("/leads/{lead_id}/ai-suggestion", response_model=SuggestionRead)
+def read_ai_suggestion(lead_id: UUID, db: Session = Depends(get_db),
+    current_user=Depends(get_current_user)):
+    return DemoAiSuggestionService(db).read(principal=_principal(db, current_user), lead_id=lead_id)
+
+
+@router.post("/leads/{lead_id}/ai-suggestion", response_model=SuggestionRead)
+def create_ai_suggestion(lead_id: UUID, db: Session = Depends(get_db),
+    current_user=Depends(get_current_user)):
+    return DemoAiSuggestionService(db).create(principal=_principal(db, current_user), lead_id=lead_id)
 
 
 @router.get("/leads/{lead_id}/follow-up", response_model=DemoFollowUpRead)

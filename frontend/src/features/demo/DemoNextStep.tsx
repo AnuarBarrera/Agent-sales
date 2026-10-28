@@ -5,6 +5,8 @@ import { getSetterReadiness } from "../leadFit/api";
 import type { SetterDraftReadinessRead } from "../leadFit/types";
 import { getDraftReview, type DemoDraftReview } from "./draftReview";
 
+import { DemoAiSuggestionPanel } from "./DemoAiSuggestionPanel";
+
 interface DraftExecution { id: string; touch1_draft: { channel: string } | null }
 
 export function DemoNextStep({ leadId, contacted = false, nextFollowUpAt = null }: { leadId: string; contacted?: boolean; nextFollowUpAt?: string | null }) {
@@ -53,10 +55,13 @@ export function DemoNextStep({ leadId, contacted = false, nextFollowUpAt = null 
     finally { inFlight.current = false; setBusy(false); }
   };
 
+  const aiSuggestion = <DemoAiSuggestionPanel leadId={leadId} />;
+
   if (contacted) return <div className="min-w-44 space-y-2 text-left">
     <p className="text-xs font-semibold text-teal-800">Contacto registrado · en seguimiento</p>
     <p className="text-xs text-slate-600">{nextFollowUpAt ? `Próximo seguimiento: ${new Date(nextFollowUpAt).toLocaleString("es-MX")}` : "Sin seguimiento programado"}</p>
     <Link className="btn-secondary" to={`/leads/${leadId}#lead-follow-up`}>Ver seguimiento</Link>
+    {aiSuggestion}
   </div>;
 
   return <div className="min-w-44 space-y-2 text-left">
@@ -74,6 +79,7 @@ export function DemoNextStep({ leadId, contacted = false, nextFollowUpAt = null 
       <button className="btn-primary" type="button" disabled={busy} onClick={() => void prepare()}>{busy ? "Preparando…" : "Preparar borrador"}</button>
     </> : readiness ? <p className="text-xs text-amber-800">{readiness.reason_codes.map(readinessReasonLabel).join(". ") || "Revisa los requisitos del prospecto."}</p> : null}
     <Link to={`/leads/${leadId}`} className="inline-block text-sm text-blue-700 underline">Abrir prospecto</Link>
+    {aiSuggestion}
   </div>;
 }
 
