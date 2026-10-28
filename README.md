@@ -173,3 +173,7 @@ Los cambios de código se publican reconstruyendo las imágenes. Los volúmenes 
 ```
 
 Agent Sales ayuda a investigar, revisar y organizar conversaciones comerciales. La evidencia disponible orienta la decisión; la intención de compra y los resultados comerciales requieren validación en una conversación real.
+
+## Licencia
+
+Este proyecto se distribuye bajo la licencia [Apache License 2.0](LICENSE).
