@@ -75,9 +75,13 @@ Identidad, prospección, contexto comercial, evaluación, borradores y actividad
 
 **Del descubrimiento a la evidencia.** Maps aporta los candidatos y sus datos iniciales. La búsqueda de la demo solicita un enriquecimiento acotado con Tavily antes de Jev: hasta una búsqueda, una extracción cuando hay una URL elegible y un máximo de tres fuentes seleccionadas por candidato. Se conserva la procedencia; encontrar una página no prueba por sí solo que pertenezca al negocio. La investigación manual adicional permanece fuera de la superficie pública.
 
-**De la evidencia al borrador.** Nebius es la plataforma de inferencia y Nemotron es el modelo configurado para las rutas que utilizan `NEBIUS_MODEL`; el valor predeterminado del repositorio es `nvidia/nemotron-3-super-120b-a12b`. El CRM integra este proveedor para análisis de prospectos, sugerencias de contexto comercial y generación de Setter. Los contratos validan la estructura de la respuesta y las referencias a evidencia autorizadas.
+**De la evidencia al borrador.** Nebius es la plataforma de inferencia y Nemotron es el modelo configurado para las rutas que utilizan `NEBIUS_MODEL`. La demo utiliza actualmente `nvidia/Nemotron-3.5-Super-VL`. El CRM integra este proveedor para análisis de prospectos, sugerencias de contexto comercial y generación de Setter. Los contratos validan la estructura de la respuesta y las referencias a evidencia autorizadas.
 
 **Disponibilidad en la demo.** La evaluación Jev y la revisión humana mantienen responsabilidades independientes de la generación. Cuando sólo puede prepararse una pregunta de discovery, Setter utiliza una plantilla determinista que reconoce la oportunidad no confirmada. Los borradores apoyados en una oportunidad establecida utilizan el proveedor Nebius configurado. La aprobación del mensaje y el registro del contacto continúan siendo acciones explícitas de la persona usuaria.
+
+**Migración solicitada por Nebius — 7 de noviembre de 2026.** Atendiendo al [aviso oficial de retiro de modelos de Token Factory](https://docs.tokenfactory.nebius.com/november-2026-deprecation-notice), se cambió la configuración de la demo de `nvidia/nemotron-3-super-120b-a12b` a su reemplazo recomendado, `nvidia/Nemotron-3.5-Super-VL`. El modelo anterior dejará de estar disponible en Serverless el **9 de noviembre de 2026**. El video y las evidencias originales del hackatón corresponden al modelo utilizado entonces; esta actualización mantiene operativo el agente con el modelo soportado por el proveedor.
+
+La migración se verificó con una llamada real al generador de sugerencias, usando datos sintéticos y un máximo de 2048 tokens de salida: respuesta completada en 5,9 segundos, JSON válido y referencias limitadas a la fuente autorizada. El consumo fue de 1622 tokens totales (368 de entrada y 1254 de salida). Esta comprobación no modificó leads ni consumió cuotas de participantes; valida esa ruta de generación, sin sustituir una nueva prueba completa de todos los flujos.
 
 ## Decisiones de diseño
 
@@ -135,7 +139,7 @@ El acceso público está deshabilitado por defecto. Para activar OTP, Maps, enri
 | Investigación web | `TAVILY_ENABLED=true`, `TAVILY_API_KEY`, `TAVILY_TIMEOUT_SECONDS` |
 | Evaluación | `LEAD_FIT_ENABLED=true`, `JEV_ENABLED=true`, `OPENROUTER_API_KEY` |
 | Inferencia Nebius | `NEBIUS_ENABLED=true`, `NEBIUS_API_KEY`, `NEBIUS_BASE_URL=https://api.tokenfactory.nebius.com/v1` |
-| Modelo Nemotron | `NEBIUS_MODEL=nvidia/nemotron-3-super-120b-a12b`; `NEBIUS_TIMEOUT_SECONDS` y, si corresponde, `NEBIUS_AI_PROJECT_ID` |
+| Modelo Nemotron | Configurar explícitamente `NEBIUS_MODEL=nvidia/Nemotron-3.5-Super-VL`; `NEBIUS_TIMEOUT_SECONDS` y, si corresponde, `NEBIUS_AI_PROJECT_ID` |
 | Capacidad global | `DEMO_GLOBAL_SEARCH_LIMIT`, con valor inicial de `40` |
 
 Publica el frontend detrás de un proxy o túnel HTTPS. El origen de la demo y el de CORS deben coincidir con ese dominio. Las credenciales deben tener habilitados los servicios y remitentes correspondientes. Las claves de correo y OTP se entregan sólo a la API.
@@ -153,6 +157,14 @@ curl --fail http://127.0.0.1:5173/api/v1/health
 ```
 
 Los cambios de código se publican reconstruyendo las imágenes. Los volúmenes de datos se conservan durante la actualización.
+
+Para aplicar únicamente un cambio de `NEBIUS_MODEL` en `.env`, recrea API y worker para que carguen las nuevas variables:
+
+```bash
+docker compose up -d --force-recreate --no-deps api worker
+```
+
+Las sugerencias ya guardadas conservan el resultado y el modelo originales; consultarlas no ejecuta inferencia con el modelo nuevo.
 
 ## Estructura de la entrega
 
